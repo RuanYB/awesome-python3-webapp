@@ -16,6 +16,12 @@ def init(loop):
 	logging.info('server started at http://127.0.0.1:9000...')
 	return srv
 
+@asyncio.coroutine
+def create_pool(loop, **kw):
+	logging.info('create database connection pool')
+	global __pool
+	
+
 loop = asyncio.get_event_loop()
 loop.run_until_complete(init(loop))
-loop.run_forever()
+loop.run_forever()	
