@@ -11,11 +11,10 @@ def log(sql, args=()):
 	logging.info('SQL: %s' % sql)
 
 # 创建一个全局的连接池，每个HTTP请求都从池中获得数据库连接
-@asyncio.coroutine
-def create_pool(loop, **kw):
+async def create_pool(loop, **kw):
 	logging.info('create database connection pool...')
 	global __pool
-	__pool = yield from aiomysql.create_pool(
+	__pool = await aiomysql.create_pool(
 		host = kw.get('host', 'localhost'),
 		port = kw.get('port', 3306),
 		user = kw['user'],
@@ -29,37 +28,43 @@ def create_pool(loop, **kw):
 		)
 
 #SELECT statement: return result set
-@asyncio.coroutine
-def select(sql, args, size=None):
+async def select(sql, args, size=None):
 	log(sql, args)
 	global __pool
-	with (yield from __pool) as conn:
+	with (await __pool) as conn:
 		#create dict cursor
-		cur = yield from conn.cursor(aiomysql.DictCursor)
+		cur = await conn.cursor(aiomysql.DictCursor)
 		#execute sql query
-		yield from cur.execute(sql.replace('?', '%s'), args or ())
+		await cur.execute(sql.replace('?', '%s'), args or ())
 		if size:
-			rs = yield from cur.fetchmany(size)
+			rs = await cur.fetchmany(size)
 		else:
-			rs = yield from cur.fetchall()
-		yield from cur.close()
+			rs = await cur.fetchall()
+		await cur.close()
 		logging.info('rows returned: %s' % len(rs))
 		return rs
 
 #INSERT, UPDATE, DELETE statement: return result count
-@asyncio.coroutine
-def execute(sql, args):
+async def execute(sql, args):
 	log(sql)
-	with (yield from __pool) as conn:
+	with (await __pool) as conn:
 		try:
 			# execute类型的SQL操作返回的结果只有行号，所以不需要用DictCursor
-			cur = yield from conn.cursor()
-			yield from cur.execute(sql.replace('?', '%s'), args)
+			cur = await conn.cursor()
+			await cur.execute(sql.replace('?', '%s'), args)
 			affected = cur.rowcount
-			yield from cur.close()
+			await cur.close()
 		except BaseException as e:
 			raise
 		return affected
+
+#根据输入的参数生成占位符列表
+def create_args_string(num):
+	L = []
+	for n in range(num):
+		L.append('?')
+	#以‘，’为分隔符，将列表合成字符串
+	return (','.join(L))
 
 #定义Field类，负责保存（数据库）表的字段名和字段类型
 class Field(object):
@@ -132,7 +137,7 @@ class ModelMetaClass(type):
 			logging.info('found mapping: %s --> %s' % (k, v))
 			mappings[k] = v
 			#找到主键
-			if v.primaryKey:
+			if v.primary_key:
 				#如果此时类实例已经存在主键，说明主键重复了
 				if primaryKey:
 					raise StandardError('Duplicate primary key for field: %s' % k)
@@ -171,7 +176,9 @@ class ModelMetaClass(type):
 		return type.__new__(cls, name, bases, attrs)
 
 
-#Define Model
+# 定义ORM所有映射的基类：Model
+# Model类的任意子类可以映射一个数据库表
+# Model类可以看作是对所有数据库表操作的基本定义的映射
 class Model(dict, metaclass=ModelMetaClass):
 
 	def __init__(self, **kw):
@@ -187,6 +194,7 @@ class Model(dict, metaclass=ModelMetaClass):
 		self[key] = value
 
 	def getValue(self, key):
+		#內建函数getattr会自动处理
 		return getattr(self, key, None)
 
 	def getValueOrDefault(self, key):
@@ -198,6 +206,87 @@ class Model(dict, metaclass=ModelMetaClass):
 				logging.debug('using default value for %s: %s' % (key, str(value)))
 				setattr(self, key, value)
 		return value
+
+	@classmethod
+	# 类方法有类变量cls传入，从而可以用cls做一些相关的处理。并且有子类继承时，调用该类方法时，传入的类变量cls是子类，而非父类
+	async def findAll(cls, where=None, args=None, **kw):
+		'''find objects by where clause'''
+		sql = [cls.__select__]
+		if where:
+			sql.append('where')
+			sql.append(where)
+
+		if args is None:
+			args = []
+
+		orderBy = kw.get('orderBy', None)
+		if orderBy:
+			sql.append('order by')
+			sql.append(orderBy)
+
+		limit = kw.get('limit', None)
+		if limit is not None:
+			sql.append('limit')
+			if isinstance(limit, int):
+				sql.append('?')
+				args.append(limit)
+			elif isinstance(limit, tuple):
+				sql.append('?, ?')
+				args.extend(limit)
+			else:
+				raise ValueError('Invalid limit value: %s' % str(limit))
+		rs = await select(' '.join(sql), args)
+		#???????????????????WTF		
+		return [cls(**r) for r in rs]
+
+	@classmethod
+	async def findNumber(cls, selectField, where=None, args=None):
+		'''find number by select and where'''
+		#????????????????????WTF: _num_
+		sql = ['select %s _num_ from `%s`' % (selectField, cls.__table__)]
+		if where:
+			sql.append('where')
+			sql.append(where)
+		rs = await select(' '.join(sql), args, 1)
+		if len(rs) == 0:
+			return None
+		return rs[0]['_num_']
+
+	@classmethod
+	async def find(cls, pk):
+		'''find object by primary key'''
+		rs = await select('%s where `%s`=?' % (cls.__select__, cls.__primary_key__), [pk], 1)
+		if len(rs)==0:
+			return None 
+		return cls(**rs[0])
+
+	#注意这里没有@classmethod注释了
+	async def save(self):
+		args = list(map(self.getValueOrDefault, sel.__fields__))
+		args.append(self.getValueOrDefault(self.__primary_key__))
+		rows = await execute(self.__insert__, args)
+		if rows != 1:
+			logging.warn('failed to insert record: affected rows: %s' % rows)
+
+	async def update(self):
+		#这里只要getValue?????????????????????
+		args = list(map(self.getValue, self.__fields__))
+		args.append(self.getValue(self.__primary_key__))
+		rows = await execute(self.__update__, args)
+		if rows != 1:
+			logging.warn('fail to update by primary key: affected rows: %s' % rows)
+
+	async def remove(self):
+		args = [self.getValue(self.__primary_key__)]
+		rows = await execute(self.__delete__, args)
+		if rows != 1:
+			logging.warn('failed to remove by primary key: affected rows: %s' % rows)
+
+
+
+
+
+
 
 
 
