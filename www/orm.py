@@ -31,30 +31,34 @@ async def create_pool(loop, **kw):
 async def select(sql, args, size=None):
 	log(sql, args)
 	global __pool
-	with (await __pool) as conn:
+	async with __pool.get() as conn:
 		#create dict cursor
-		cur = await conn.cursor(aiomysql.DictCursor)
-		#execute sql query
-		await cur.execute(sql.replace('?', '%s'), args or ())
-		if size:
-			rs = await cur.fetchmany(size)
-		else:
-			rs = await cur.fetchall()
-		await cur.close()
+		async with conn.cursor(aiomysql.DictCursor) as cur:
+			#execute sql query
+			await cur.execute(sql.replace('?', '%s'), args or ())
+			if size:
+				rs = await cur.fetchmany(size)
+			else:
+				rs = await cur.fetchall()
 		logging.info('rows returned: %s' % len(rs))
 		return rs
 
 #INSERT, UPDATE, DELETE statement: return result count
-async def execute(sql, args):
+async def execute(sql, args, autocommit=True):
 	log(sql)
-	with (await __pool) as conn:
+	async with __pool.get() as conn:
+		if not autocommit:
+			await conn.begin()
 		try:
 			# execute类型的SQL操作返回的结果只有行号，所以不需要用DictCursor
-			cur = await conn.cursor()
-			await cur.execute(sql.replace('?', '%s'), args)
-			affected = cur.rowcount
-			await cur.close()
+			async with conn.cursor(aiomysql.DictCursor) as cur:
+				await cur.execute(sql.replace('?', '%s'), args)
+				affected = cur.rowcount
+			if not autocommit:
+				await conn.commit()
 		except BaseException as e:
+			if not autocommit:
+				await conn.rollback()
 			raise
 		return affected
 
@@ -262,7 +266,7 @@ class Model(dict, metaclass=ModelMetaClass):
 
 	#注意这里没有@classmethod注释了
 	async def save(self):
-		args = list(map(self.getValueOrDefault, sel.__fields__))
+		args = list(map(self.getValueOrDefault, self.__fields__))
 		args.append(self.getValueOrDefault(self.__primary_key__))
 		rows = await execute(self.__insert__, args)
 		if rows != 1:
