@@ -6,9 +6,9 @@ create database awesome;
 
 use awesome;
 
-grant select, insert, update, delete on awesome.* to 'root'@'localhost' identified by '790332099'
+grant select, insert, update, delete on awesome.* to 'ryan'@'localhost' identified by '790332099';
 
-create table users (
+create table users(
 	`id` varchar(50) not null,
 	`email` varchar(50) not null,
 	`passwd` varchar(50) not null,
@@ -16,12 +16,12 @@ create table users (
 	`name` varchar(50) not null,
 	`image` varchar(500) not null,
 	`create_at` real not null,
-	unique key `idx_email` (`email),
+	unique key `idx_email` (`email`),
 	key `idx_create_at` (`create_at`),
 	primary key (`id`)
-) engine=innodb default charset=utf8;
+)engine=innodb default charset=utf8;
 
-create table blogs (
+create table blogs(
 	`id` varchar(50) not null,
 	`user_id` varchar(50) not null,
 	`user_name` varchar(50) not null,
@@ -30,11 +30,11 @@ create table blogs (
 	`summary` varchar(200) not null,
 	`content` mediumtext not null,
 	`create_at` real not null,
-	key `idx_create_at` (`create_at),
+	key `idx_create_at` (`create_at`),
 	primary key (`id`)
-) engine=innodb default charset=utf8;
+)engine=innodb default charset=utf8;
 
-create table comments (
+create table comments(
 	`id` varchar(50) not null,
 	`blog_id` varchar(50) not null,
 	`user_id` varchar(50) not null,
