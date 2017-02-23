@@ -19,7 +19,7 @@ async def create_pool(loop, **kw):
 		port = kw.get('port', 3306),
 		user = kw['user'],
 		password = kw['password'],
-		db = kw['db'],
+		db = kw['database'],
 		charset = kw.get('charset', 'utf8'),
 		autocommit = kw.get('autocommit', True),
 		maxsize = kw.get('maxsize', 10),
@@ -134,21 +134,21 @@ class ModelMetaClass(type):
 		mappings = dict()
 		fields = []
 		primaryKey = None
-		for k,v in attrs.items():
+		for k, v in attrs.items():
 			#Field属性
 			if isinstance(v, Field):
-			#k是类的一个属性，v是这个属性在数据库中对应的Field列表属性
-			logging.info('found mapping: %s --> %s' % (k, v))
-			mappings[k] = v
-			#找到主键
-			if v.primary_key:
-				#如果此时类实例已经存在主键，说明主键重复了
-				if primaryKey:
-					raise StandardError('Duplicate primary key for field: %s' % k)
-				#否则将此列设为列表的主键
-				primaryKey = k
-			else:
-				fields.append(k)
+				#k是类的一个属性，v是这个属性在数据库中对应的Field列表属性
+				logging.info('found mapping: %s --> %s' % (k, v))
+				mappings[k] = v
+				#找到主键
+				if v.primary_key:
+					#如果此时类实例已经存在主键，说明主键重复了
+					if primaryKey:
+						raise StandardError('Duplicate primary key for field: %s' % k)
+					#否则将此列设为列表的主键
+					primaryKey = k
+				else:
+					fields.append(k)
 		#end for 
 
 		if not primaryKey:
@@ -162,7 +162,7 @@ class ModelMetaClass(type):
 		escaped_fields = list(map(lambda f : '`%s`' % f, fields))
 
 		#保存属性和列的映射关系
-		attrs['__mappings'] = mappings
+		attrs['__mappings__'] = mappings
 		#保存表名
 		attrs['__table__'] = tableName
 		#保存主键属性名
