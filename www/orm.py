@@ -68,7 +68,7 @@ def create_args_string(num):
 	for n in range(num):
 		L.append('?')
 	#以‘，’为分隔符，将列表合成字符串
-	return (','.join(L))
+	return (', '.join(L))
 
 #定义Field类，负责保存（数据库）表的字段名和字段类型
 class Field(object):
